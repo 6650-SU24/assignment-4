@@ -38,10 +38,10 @@ public class LiftRideEvent {
         int minutes = this.liftRide.getTime() % 60;
 
         LocalDate date = LocalDate.of(Integer.parseInt(this.seasonID), 1, 1).plusDays(Integer.parseInt(this.dayID) - 1);
-        LocalTime time = LocalTime.of(startHour + hours, startMinute + minutes, new Random().nextInt(60));
+        LocalTime time = LocalTime.of(startHour + hours, startMinute + minutes, new Random().nextInt(60), new Random().nextInt(1000000000));
         LocalDateTime dateTime = LocalDateTime.of(date, time);
 
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.nnnnnnnnn");
         this.timestamp = dateTime.format(formatter);
 
     }

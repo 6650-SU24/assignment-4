@@ -25,9 +25,9 @@ import rmqpool.RMQChannelPool;
 public class SkierServlet extends HttpServlet {
     private static final String EXCHANGE_NAME = "LiftRide";
     private static final String ROUTING_KEY = "LiftRideKey";
-    private static final int MAX_REQUESTS = 5000;
+    private static final int MAX_REQUESTS = 4000;
     private static final long TIMEOUT = 1;
-    private static final int THRESHOLD = 4000;
+    private static final int THRESHOLD = 3500;
     private RMQChannelPool channelPool;
     private Connection connection;
 
@@ -81,13 +81,24 @@ public class SkierServlet extends HttpServlet {
             res.setStatus(HttpServletResponse.SC_NOT_FOUND);
             res.getWriter().write("invalid url");
         } else {
-            res.setStatus(HttpServletResponse.SC_OK);
-            // TODO: process url params in `urlParts` for doGet
-            int totalVertical = 34507;
-            PrintWriter out = res.getWriter();
-            out.print(totalVertical);
-            out.flush();
+            if (urlParts[2].equals("vertical")) {
+                getTotalVertical(req, res, liftRideEvent);
+            } else {
+                getDayVertical(req, res, liftRideEvent);
+            }
         }
+    }
+
+
+    private void getTotalVertical(HttpServletRequest req, HttpServletResponse res, LiftRideEvent liftRideEvent) throws IOException {
+        // TODO: handle GET/skiers/{skierID}/vertical, parameters already parsed, validated and stored in the variable @liftRideEvent
+        res.setStatus(HttpServletResponse.SC_OK);
+        res.getWriter().write("Handled getTotalVertical: skierID=" + liftRideEvent.getSkierID());
+    }
+    private void getDayVertical(HttpServletRequest req, HttpServletResponse res, LiftRideEvent liftRideEvent) throws IOException {
+        // TODO: handle GET/skiers/{resortID}/seasons/{seasonID}/days/{dayID}/skiers/{skierID},parameters already parsed, validated and stored in the variable @liftRideEvent
+        res.setStatus(HttpServletResponse.SC_OK);
+        res.getWriter().write("Handled getDayVertical: skierID=" + liftRideEvent.getSkierID());
     }
 
     @Override
@@ -200,11 +211,25 @@ public class SkierServlet extends HttpServlet {
 
     private boolean isUrlValid(String[] urlPath, LiftRideEvent liftRideEvent) {
         // https://app.swaggerhub.com/apis/cloud-perf/SkiDataAPI/2.0#/skiers/writeNewLiftRide
+        // /skiers/{skierID}/vertical
+        if (urlPath.length == 3 && urlPath[2].equals("vertical")) {
+            try {
+                int skierID = Integer.parseInt(urlPath[1]);
+                if (skierID < 1 || skierID > 100000) {
+                    return false;
+                } else {
+                    liftRideEvent.setSkierID(skierID);
+                    return true;
+                }
+            } catch (NumberFormatException e) {
+                return false;
+            }
+        }
+
         // /skiers/{resortID}/seasons/{seasonID}/days/{dayID}/skiers/{skierID}
         // urlPath  = "/1/seasons/2019/days/1/skiers/123"
         // urlParts = [, 1, seasons, 2019, day, 1, skier, 123]
 //      // Data range rule refer to Assignment 1
-
         if (urlPath.length != 8) return false;
 
         // Check resortID
