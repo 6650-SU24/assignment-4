@@ -5,7 +5,7 @@ import io.swagger.client.api.SkiersApi;
 import io.swagger.client.model.LiftRide;
 public class SingleTest {
     private static final int TEST_REQUESTS = 100;
-//    private static final String BASE_PATH = "http://ec2-18-236-199-116.us-west-2.compute.amazonaws.com:8080/lab_war/";
+//    private static final String BASE_PATH = "http://ec2-34-215-248-83.us-west-2.compute.amazonaws.com:8080/lab_war/";
     private static final String BASE_PATH = "http://localhost:8888/lab_war_exploded/";
 
     public static void main(String[] args) {

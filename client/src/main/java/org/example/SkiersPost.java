@@ -41,7 +41,7 @@ public class SkiersPost {
             System.err.println("Server IP not configured in config.properties");
             return;
         }
-        System.out.println("read property finish");
+//        System.out.println("read property finish");
         long startTime = System.currentTimeMillis();
         new Thread(() -> {
             for (int i = 0; i < TOTAL_REQUESTS; i++) {
@@ -53,25 +53,30 @@ public class SkiersPost {
             }
         }).start();
 
-        ExecutorService executorService = Executors.newFixedThreadPool(STARTUP_THREADS);
-        for (int i = 0; i < STARTUP_THREADS; i++) {
-            executorService.submit(() -> sendRequest(REQUESTS_PER_THREAD));
-        }
-        executorService.shutdown();
-        try {
-            if (!executorService.awaitTermination(3, TimeUnit.MINUTES)) {
-                executorService.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-        System.out.println("first part finish");
-        int remainingPerThread =1000;
-        int remainingReqs = TOTAL_REQUESTS - (STARTUP_THREADS * REQUESTS_PER_THREAD);
+//        ExecutorService executorService = Executors.newFixedThreadPool(STARTUP_THREADS);
+//        for (int i = 0; i < STARTUP_THREADS; i++) {
+//            executorService.submit(() -> sendRequest(REQUESTS_PER_THREAD));
+//        }
+//        executorService.shutdown();
+//        try {
+//            if (!executorService.awaitTermination(3, TimeUnit.MINUTES)) {
+//                executorService.shutdownNow();
+//            }
+//        } catch (InterruptedException e) {
+//            e.printStackTrace();
+//        }
+//        System.out.println("first part finish");
+        int remainingPerThread =2000;
+//        int remainingReqs = TOTAL_REQUESTS - (STARTUP_THREADS * REQUESTS_PER_THREAD);
+        int remainingReqs = TOTAL_REQUESTS;
         int additionalThreads = remainingReqs / remainingPerThread;
-        executorService = Executors.newFixedThreadPool(additionalThreads);
+        int remainder = remainingReqs % remainingPerThread;
+        ExecutorService executorService = Executors.newFixedThreadPool(additionalThreads+ (remainder > 0 ? 1 : 0));
         for (int i = 0; i < additionalThreads; i++) {
             executorService.submit(() -> sendRequest(remainingPerThread));
+        }
+        if (remainder > 0) {
+            executorService.submit(() -> sendRequest(remainder));
         }
         executorService.shutdown();
         try {
@@ -81,7 +86,7 @@ public class SkiersPost {
         } catch (InterruptedException e) {
             executorService.shutdownNow();
         }
-        System.out.println("second part finish");
+//        System.out.println("second part finish");
         long endTime = System.currentTimeMillis();
         double throughput = (double) TOTAL_REQUESTS / ((endTime - startTime) / 1000.0);
 
