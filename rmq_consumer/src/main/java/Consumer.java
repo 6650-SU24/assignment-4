@@ -5,14 +5,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import com.google.gson.Gson;
 import software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.exception.SdkClientException;
-import software.amazon.awssdk.core.exception.SdkServiceException;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
@@ -21,12 +19,10 @@ import software.amazon.awssdk.services.dynamodb.model.*;
 public class Consumer {
     private static final String EXCHANGE_NAME = "LiftRide";
     private static final String TABLE_NAME = "LiftRide";
-
     private static final String QUEUE_NAME = "LiftRideQueue";
     private static final String ROUTING_KEY = "LiftRideKey";
-    private static final int THREAD_POOL_SIZE = 200;
+    private static final int THREAD_POOL_SIZE = 150;
     private final static int BATCH_SIZE = 25;
-
     private static final Gson gson = new Gson();
 
 
@@ -81,21 +77,26 @@ public class Consumer {
                                     "dayID", AttributeValue.builder().n(String.valueOf(event.getDayID())).build(),
                                     "time", AttributeValue.builder().n(String.valueOf(event.getLiftRide().getTime())).build());
 
-                            items.add(item);
-                            if (items.size() >= BATCH_SIZE) {
-                                writeBatchToDB(ddb, items);
-                                items.clear();
+                            synchronized (items) {
+                                items.add(item);
+                                if (items.size() >= BATCH_SIZE) {
+                                    writeBatchToDB(items);
+                                    items.clear();
+                                }
                             }
+                            channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
                         };
 
-                        channel.basicConsume(QUEUE_NAME, true, deliverCallback, consumerTag -> {});
+                        channel.basicConsume(QUEUE_NAME, false, deliverCallback, consumerTag -> {});
 
                         Executors.newScheduledThreadPool(1).scheduleAtFixedRate(() -> {
-                            if (!items.isEmpty()) {
-                                writeBatchToDB(ddb, items);
-                                items.clear();
+                            synchronized (items) {
+                                if (!items.isEmpty()) {
+                                    writeBatchToDB(items);
+                                    items.clear();
+                                }
                             }
-                        }, 0, 1, TimeUnit.MINUTES);
+                        }, 60, 30, TimeUnit.SECONDS);
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
@@ -114,7 +115,7 @@ public class Consumer {
     }
 
 
-        private static void writeBatchToDB(DynamoDbClient ddb, List<Map<String, AttributeValue>> items) {
+        private static void writeBatchToDB(List<Map<String, AttributeValue>> items) {
             List<WriteRequest> writeRequests = items.stream()
                     .map(item -> WriteRequest.builder()
                             .putRequest(PutRequest.builder()
@@ -136,7 +137,7 @@ public class Consumer {
 
             while (!success && attempts < 5) {
                 try {
-                    BatchWriteItemResponse result = ddb.batchWriteItem(batchRequest);
+                    BatchWriteItemResponse result = Consumer.ddb.batchWriteItem(batchRequest);
                     if (result.hasUnprocessedItems() && !result.unprocessedItems().isEmpty()) {
                         requestItems = result.unprocessedItems();
                         batchRequest = BatchWriteItemRequest.builder()
