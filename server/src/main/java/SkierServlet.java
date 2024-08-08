@@ -5,6 +5,8 @@ import javax.servlet.annotation.*;
 import java.io.*;
 import java.security.InvalidParameterException;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
@@ -21,6 +23,15 @@ import org.apache.commons.lang3.concurrent.EventCountCircuitBreaker;
 import rmqpool.RMQChannelFactory;
 import rmqpool.RMQChannelPool;
 
+import software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider;
+import software.amazon.awssdk.awscore.exception.AwsServiceException;
+import software.amazon.awssdk.core.exception.SdkClientException;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.model.*;
+
+import redis.clients.jedis.Jedis;
+
 @WebServlet(name = "SkierServlet", value = "/SkierServlet")
 public class SkierServlet extends HttpServlet {
     private static final String EXCHANGE_NAME = "LiftRide";
@@ -34,12 +45,17 @@ public class SkierServlet extends HttpServlet {
     private Gson gson = new Gson();
     private static EventCountCircuitBreaker circuitBreaker;
 
+    private static final DynamoDbClient ddb = DynamoDbClient.builder()
+            .region(Region.US_WEST_2)
+            .credentialsProvider(ProfileCredentialsProvider.create())
+            .build();
+
 
     @Override
     public void init() throws ServletException {
         super.init();
         Properties properties = new Properties();
-        try  {
+        try {
             properties.load(getServletContext().getResourceAsStream("/WEB-INF/config.properties"));
         } catch (IOException e) {
             System.err.println("Error loading config.properties: " + e.getMessage());
@@ -68,7 +84,7 @@ public class SkierServlet extends HttpServlet {
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse res) throws IOException {
-        LiftRideEvent liftRideEvent= new LiftRideEvent();
+        LiftRideEvent liftRideEvent = new LiftRideEvent();
         res.setContentType("text/plain");
         String urlPath = req.getPathInfo();
         if (urlPath == null || urlPath.isEmpty()) {
@@ -77,7 +93,7 @@ public class SkierServlet extends HttpServlet {
             return;
         }
         String[] urlParts = urlPath.split("/");
-        if (!isUrlValid(urlParts,  liftRideEvent)) {
+        if (!isUrlValid(urlParts, liftRideEvent)) {
             res.setStatus(HttpServletResponse.SC_NOT_FOUND);
             res.getWriter().write("invalid url");
         } else {
@@ -95,8 +111,55 @@ public class SkierServlet extends HttpServlet {
         res.setStatus(HttpServletResponse.SC_OK);
         res.getWriter().write("Handled getTotalVertical: skierID=" + liftRideEvent.getSkierID());
     }
+
     private void getDayVertical(HttpServletRequest req, HttpServletResponse res, LiftRideEvent liftRideEvent) throws IOException {
         // TODO: handle GET/skiers/{resortID}/seasons/{seasonID}/days/{dayID}/skiers/{skierID},parameters already parsed, validated and stored in the variable @liftRideEvent
+        int skierID = liftRideEvent.getSkierID();
+        int resortID = liftRideEvent.getResortID();
+        String seasonID = liftRideEvent.getSeasonID();
+        String dayID = liftRideEvent.getDayID();
+
+        // Checks the cache for the vertical first
+        Jedis jedis = new Jedis("liftrideevents-lpt25z.serverless.usw2.cache.amazonaws.com:6379", 6379);
+        String cacheKey = String.format("skier:%d:resort:%d:season%s:day:%s:vertical", skierID, resortID, seasonID, dayID);
+        String cachedVertical = jedis.get(cacheKey);
+
+        if (cachedVertical != null) {
+            res.setStatus(HttpServletResponse.SC_OK);
+            res.getWriter().write("Total vertical: " + cachedVertical);
+            jedis.close();
+            return;
+        }
+
+        // Queries DynamoDB for lift rides if the cache is empty
+        Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
+        expressionAttributeValues.put(":skierID", AttributeValue.builder().n(String.valueOf(skierID)).build());
+        expressionAttributeValues.put(":resortID", AttributeValue.builder().n(String.valueOf(resortID)).build());
+        expressionAttributeValues.put(":seasonID", AttributeValue.builder().s(String.valueOf(seasonID)).build());
+        expressionAttributeValues.put(":dayID", AttributeValue.builder().s(String.valueOf(dayID)).build());
+
+        QueryRequest queryRequest = QueryRequest.builder()
+                .tableName("LiftRide")
+                .keyConditionExpression("skierID = :skierID and resortID = :resortID and seasonID = :seasonID and dayID = :dayID")
+                .expressionAttributeValues(expressionAttributeValues)
+                .build();
+
+        QueryResponse queryResponse = ddb.query(queryRequest);
+
+        // Calculates the total vertical
+        int totalVertical = 0;
+        for (Map<String, AttributeValue> item : queryResponse.items()) {
+            int liftID = Integer.parseInt(item.get("liftID").n());
+            totalVertical += liftID * 10;
+        }
+
+        // Writes the result to the cache
+        jedis.set(cacheKey, String.valueOf(totalVertical));
+
+        // Closes the jedis connection
+        jedis.close();
+
+        // Sends response to the client
         res.setStatus(HttpServletResponse.SC_OK);
         res.getWriter().write("Handled getDayVertical: skierID=" + liftRideEvent.getSkierID());
     }
