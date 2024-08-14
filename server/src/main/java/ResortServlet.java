@@ -1,18 +1,66 @@
 
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.rabbitmq.client.Connection;
 import model.LiftRideEvent;
+import org.w3c.dom.Attr;
+import redis.clients.jedis.AbstractTransaction;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.JedisPoolConfig;
+import software.amazon.awssdk.auth.credentials.EnvironmentVariableCredentialsProvider;
+import software.amazon.awssdk.http.apache.ApacheHttpClient;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.QueryRequest;
+import software.amazon.awssdk.services.dynamodb.model.QueryResponse;
 
+import javax.servlet.ServletException;
 import javax.servlet.annotation.WebServlet;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
-
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 
 @WebServlet(name = "ResortServlet", value = "/ResortServlet")
 public class ResortServlet extends HttpServlet {
+    private JedisPool jedisPool;
+    private Connection connection;
 
+    private Gson gson = new Gson();
+
+    private DynamoDbClient ddb;
+
+    public void init() throws ServletException {
+        ddb = DynamoDbClient.builder()
+                .region(Region.US_WEST_2)
+                .credentialsProvider(EnvironmentVariableCredentialsProvider.create())
+                .httpClient(ApacheHttpClient.builder().build())
+                .build();
+
+        JedisPoolConfig poolConfig = new JedisPoolConfig();
+        poolConfig.setMaxTotal(100);
+        try {
+            jedisPool = new JedisPool(poolConfig,
+                    "liftrideevents-nlyipt.serverless.usw2.cache.amazonaws.com",
+                    6379,
+                    15000, // Connection timeout
+                    null,
+                    true // Use TLS
+            );
+        } catch (Exception e) {
+            throw new ServletException("Failed to initialize Jedis connection and channel pool", e);
+        }
+    }
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse res) throws IOException {
@@ -30,11 +78,78 @@ public class ResortServlet extends HttpServlet {
             res.getWriter().write("invalid url");
         } else {
 //            TODO: handle GET/resorts/{resortID}/seasons/{seasonID}/day/{dayID}/skiers, parameters already parsed, validated and stored in the variable @liftRideEvent
-            res.setStatus(HttpServletResponse.SC_OK);
-            res.getWriter().write("Handled get resort unique skiers count");
+            if (urlParts.length == 7 && urlParts[6].equals("skiers")) {
+                getResortSkiersDay(req, res, liftRideEvent);
+            }
         }
     }
 
+    private void getResortSkiersDay(HttpServletRequest req, HttpServletResponse res, LiftRideEvent liftRideEvent) throws IOException {
+        int resortID = liftRideEvent.getResortID();
+        String seasonID = liftRideEvent.getSeasonID();
+        String dayID = liftRideEvent.getDayID();
+        JsonObject jsonObject = new JsonObject();
+
+        // Constructs the cache key for Redis
+        String cacheKey = String.format("resort:%d:season:%s:day:%s:uniqueSkiers", resortID, seasonID, dayID);
+        Jedis jedis = null;
+        try {
+            jedis = jedisPool.getResource();
+            String cachedUniqueSkiers = jedis.get(cacheKey);
+            if (cachedUniqueSkiers != null) {
+                res.setStatus(HttpServletResponse.SC_OK);
+                jsonObject.addProperty("uniqueSkiers", Integer.parseInt(cachedUniqueSkiers));
+                res.getWriter().write(gson.toJson(jsonObject));
+                return;
+            }
+
+            // If not in cache query DynamoDB for skiers
+            QueryResponse queryResponse = queryToDB(liftRideEvent);
+            Set<String> uniqueSkiers = new HashSet<>();
+            for (Map<String, AttributeValue> item : queryResponse.items()) {
+                uniqueSkiers.add(item.get("skierID").s());
+            }
+            int uniqueSkiersCount = uniqueSkiers.size();
+
+            // Updates the cache with the new value
+            jedis.set(cacheKey, String.valueOf(uniqueSkiersCount));
+
+            // Returns the unique skiers count to the client
+            res.setStatus(HttpServletResponse.SC_OK);
+            jsonObject.addProperty("uniqueSkiers", uniqueSkiersCount);
+            res.getWriter().write(gson.toJson(jsonObject));
+        } catch (Exception e) {
+            res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            res.getWriter().write("An error occurred while processing the request");
+        } finally {
+            if (jedis != null) {
+                jedis.close();
+            }
+        }
+    }
+
+    private QueryResponse queryToDB(LiftRideEvent liftRideEvent) {
+        String resortID = String.valueOf(liftRideEvent.getResortID());
+        String seasonID = liftRideEvent.getSeasonID();
+        String dayID = liftRideEvent.getDayID();
+
+        Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
+        expressionAttributeValues.put(":resortID", AttributeValue.builder().n(resortID).build());
+        expressionAttributeValues.put(":seasonID", AttributeValue.builder().s(seasonID).build());
+        expressionAttributeValues.put(":dayID", AttributeValue.builder().n(dayID).build());
+
+        String keyConditionExpression = "resortID = :resortID and seasonID = :seasonID";
+        String filterExpression = "dayID = :dayID";
+
+        QueryRequest queryRequest = QueryRequest.builder()
+                .tableName("LiftRide")
+                .keyConditionExpression(keyConditionExpression)
+                .filterExpression(filterExpression)
+                .expressionAttributeValues(expressionAttributeValues)
+                .build();
+
+        return ddb.query(queryRequest);
+    }
 
     private boolean isUrlValid(String[] urlPath, LiftRideEvent liftRideEvent) {
         // https://app.swaggerhub.com/apis/cloud-perf/SkiDataAPI/2.0#/skiers/writeNewLiftRide
