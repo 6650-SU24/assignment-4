@@ -75,7 +75,14 @@ public class Consumer {
                                     "liftID", AttributeValue.builder().n(String.valueOf(event.getLiftRide().getLiftID())).build(),
                                     "seasonID", AttributeValue.builder().n(String.valueOf(event.getSeasonID())).build(),
                                     "dayID", AttributeValue.builder().n(String.valueOf(event.getDayID())).build(),
-                                    "time", AttributeValue.builder().n(String.valueOf(event.getLiftRide().getTime())).build());
+                                    "time", AttributeValue.builder().n(String.valueOf(event.getLiftRide().getTime())).build(),
+                                    "resort-season-day", AttributeValue.builder().s(String.format("%s-%s-%s",
+                                            event.getResortID(),
+                                            event.getSeasonID(),
+                                            event.getDayID())).build(),
+                                    "skier-timestamp", AttributeValue.builder().s(String.format("%s-%s",
+                                            event.getSkierID(),
+                                            event.getTimestamp())).build());
 
                             synchronized (items) {
                                 items.add(item);

@@ -46,7 +46,7 @@ public class LiftRideEvent {
 //        int seasonID = random.nextInt(10) + 2015;
         int seasonID = 2024;
 //        int dayID = random.nextInt(366) + 1;
-        int dayID = 3;
+        int dayID = 1;
         int skierID = random.nextInt(100000) + 1;
         LiftRide liftRide = new LiftRide();
         liftRide.setLiftID(random.nextInt(40) + 1);

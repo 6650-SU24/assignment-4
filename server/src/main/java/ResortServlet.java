@@ -1,10 +1,9 @@
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
-import com.rabbitmq.client.Connection;
+
 import model.LiftRideEvent;
-import org.w3c.dom.Attr;
-import redis.clients.jedis.AbstractTransaction;
+
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisPoolConfig;
@@ -23,6 +22,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
+
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
@@ -34,7 +34,6 @@ import java.util.Set;
 @WebServlet(name = "ResortServlet", value = "/ResortServlet")
 public class ResortServlet extends HttpServlet {
     private JedisPool jedisPool;
-    private Connection connection;
 
     private Gson gson = new Gson();
 
@@ -78,9 +77,7 @@ public class ResortServlet extends HttpServlet {
             res.getWriter().write("invalid url");
         } else {
 //            TODO: handle GET/resorts/{resortID}/seasons/{seasonID}/day/{dayID}/skiers, parameters already parsed, validated and stored in the variable @liftRideEvent
-            if (urlParts.length == 7 && urlParts[6].equals("skiers")) {
-                getResortSkiersDay(req, res, liftRideEvent);
-            }
+            getResortSkiersDay(req, res, liftRideEvent);
         }
     }
 
@@ -107,7 +104,7 @@ public class ResortServlet extends HttpServlet {
             QueryResponse queryResponse = queryToDB(liftRideEvent);
             Set<String> uniqueSkiers = new HashSet<>();
             for (Map<String, AttributeValue> item : queryResponse.items()) {
-                uniqueSkiers.add(item.get("skierID").s());
+                uniqueSkiers.add(item.get("skier-timestamp").s().split("-", 2)[0]);
             }
             int uniqueSkiersCount = uniqueSkiers.size();
 
@@ -120,7 +117,7 @@ public class ResortServlet extends HttpServlet {
             res.getWriter().write(gson.toJson(jsonObject));
         } catch (Exception e) {
             res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-            res.getWriter().write("An error occurred while processing the request");
+            res.getWriter().write("An error occurred while processing the request: "+ e.getMessage());
         } finally {
             if (jedis != null) {
                 jedis.close();
@@ -134,18 +131,17 @@ public class ResortServlet extends HttpServlet {
         String dayID = liftRideEvent.getDayID();
 
         Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
-        expressionAttributeValues.put(":resortID", AttributeValue.builder().n(resortID).build());
-        expressionAttributeValues.put(":seasonID", AttributeValue.builder().s(seasonID).build());
-        expressionAttributeValues.put(":dayID", AttributeValue.builder().n(dayID).build());
-
-        String keyConditionExpression = "resortID = :resortID and seasonID = :seasonID";
-        String filterExpression = "dayID = :dayID";
+        expressionAttributeValues.put(":resortSeasonDay", AttributeValue.builder().s(String.format("%s-%s-%s",resortID,seasonID,dayID)).build());
+        Map<String, String> expressionAttributeNames = new HashMap<>();
+        expressionAttributeNames.put("#resortSeasonDay", "resort-season-day");
+        String keyConditionExpression = "#resortSeasonDay = :resortSeasonDay";
 
         QueryRequest queryRequest = QueryRequest.builder()
                 .tableName("LiftRide")
+                .indexName("resort-season-day-skier-timestamp-index")
                 .keyConditionExpression(keyConditionExpression)
-                .filterExpression(filterExpression)
                 .expressionAttributeValues(expressionAttributeValues)
+                .expressionAttributeNames(expressionAttributeNames)
                 .build();
 
         return ddb.query(queryRequest);
@@ -175,7 +171,7 @@ public class ResortServlet extends HttpServlet {
         liftRideEvent.setSeasonID(urlPath[3]);
 
         // Check days
-        if (!urlPath[4].equals("days")) return false;
+        if (!urlPath[4].equals("day")) return false;
 
         // Check dayID
         try {

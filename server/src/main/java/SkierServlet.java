@@ -135,8 +135,59 @@ public class SkierServlet extends HttpServlet {
 
     private void getTotalVertical(HttpServletRequest req, HttpServletResponse res, LiftRideEvent liftRideEvent) throws IOException {
         // TODO: handle GET/skiers/{skierID}/vertical, parameters already parsed, validated and stored in the variable @liftRideEvent
-        res.setStatus(HttpServletResponse.SC_OK);
-        res.getWriter().write("Handled getTotalVertical: skierID=" + liftRideEvent.getSkierID());
+        int skierID = liftRideEvent.getSkierID();
+        JsonObject jsonObject = new JsonObject();
+
+        String cacheKey = String.format("skier:%d:vertical", skierID);
+        Jedis jedis = null;
+
+        try {
+            jedis = jedisPool.getResource();
+            // Check if the vertical data is cached
+            String cachedVertical = jedis.get(cacheKey);
+
+            if (cachedVertical != null) {
+                // Return cached data
+                res.setStatus(HttpServletResponse.SC_OK);
+                jsonObject.addProperty("value", Integer.parseInt(cachedVertical));
+                res.getWriter().write(gson.toJson(jsonObject));
+                return;
+            }
+
+            // If not in cache, query DynamoDB
+            Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
+            expressionAttributeValues.put(":skierID", AttributeValue.builder().n(String.valueOf(liftRideEvent.getSkierID())).build());
+            QueryRequest queryRequest = QueryRequest.builder()
+                    .tableName("LiftRide")
+                    .keyConditionExpression("skierID = :skierID")
+                    .expressionAttributeValues(expressionAttributeValues)
+                    .build();
+
+            QueryResponse queryResponse = ddb.query(queryRequest);
+
+            // Calculate the total vertical
+            int totalVertical = 0;
+            for (Map<String, AttributeValue> item : queryResponse.items()) {
+                int liftID = Integer.parseInt(item.get("liftID").n());
+                totalVertical += liftID * 10;
+            }
+
+            // Cache the result
+            jedis.set(cacheKey, String.valueOf(totalVertical));
+
+            // Send the response
+            res.setStatus(HttpServletResponse.SC_OK);
+            jsonObject.addProperty("value", totalVertical);
+            res.getWriter().write(gson.toJson(jsonObject));
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        } finally {
+            if (jedis != null) {
+                jedis.close();
+            }
+        }
     }
     private void getDayVertical(HttpServletRequest req, HttpServletResponse res, LiftRideEvent liftRideEvent) throws IOException {
         // TODO: handle GET/skiers/{resortID}/seasons/{seasonID}/days/{dayID}/skiers/{skierID},parameters already parsed, validated and stored in the variable @liftRideEvent

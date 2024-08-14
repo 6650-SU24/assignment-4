@@ -66,7 +66,7 @@ public class SkiersPost {
 //            e.printStackTrace();
 //        }
 //        System.out.println("first part finish");
-        int remainingPerThread =2000;
+        int remainingPerThread =2500;
 //        int remainingReqs = TOTAL_REQUESTS - (STARTUP_THREADS * REQUESTS_PER_THREAD);
         int remainingReqs = TOTAL_REQUESTS;
         int additionalThreads = remainingReqs / remainingPerThread;
