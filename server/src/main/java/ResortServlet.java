@@ -25,10 +25,7 @@ import java.io.IOException;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 
 @WebServlet(name = "ResortServlet", value = "/ResortServlet")
@@ -101,11 +98,15 @@ public class ResortServlet extends HttpServlet {
             }
 
             // If not in cache query DynamoDB for skiers
-            QueryResponse queryResponse = queryToDB(liftRideEvent);
             Set<String> uniqueSkiers = new HashSet<>();
-            for (Map<String, AttributeValue> item : queryResponse.items()) {
-                uniqueSkiers.add(item.get("skier-timestamp").s().split("-", 2)[0]);
+            QueryResponse queryResponse;
+            for (int i=1; i<41; i++) { //liftID range
+                queryResponse = queryToDB(liftRideEvent,i);
+                for (Map<String, AttributeValue> item : queryResponse.items()) {
+                    uniqueSkiers.add(item.get("skier-timestamp").s().split("-", 2)[0]);
+                }
             }
+
             int uniqueSkiersCount = uniqueSkiers.size();
 
             // Updates the cache with the new value
@@ -125,25 +126,24 @@ public class ResortServlet extends HttpServlet {
         }
     }
 
-    private QueryResponse queryToDB(LiftRideEvent liftRideEvent) {
+    private QueryResponse queryToDB(LiftRideEvent liftRideEvent, int liftID) {
         String resortID = String.valueOf(liftRideEvent.getResortID());
         String seasonID = liftRideEvent.getSeasonID();
         String dayID = liftRideEvent.getDayID();
 
         Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
-        expressionAttributeValues.put(":resortSeasonDay", AttributeValue.builder().s(String.format("%s-%s-%s",resortID,seasonID,dayID)).build());
+        expressionAttributeValues.put(":resortSeasonDay", AttributeValue.builder().s(String.format("%s-%s-%s-%s",resortID,seasonID,dayID, liftID)).build());
         Map<String, String> expressionAttributeNames = new HashMap<>();
-        expressionAttributeNames.put("#resortSeasonDay", "resort-season-day");
+        expressionAttributeNames.put("#resortSeasonDay", "resort-season-day-lift");
         String keyConditionExpression = "#resortSeasonDay = :resortSeasonDay";
 
         QueryRequest queryRequest = QueryRequest.builder()
                 .tableName("LiftRide")
-                .indexName("resort-season-day-skier-timestamp-index")
+                .indexName("resort-season-day-lift-skier-timestamp-index")
                 .keyConditionExpression(keyConditionExpression)
                 .expressionAttributeValues(expressionAttributeValues)
                 .expressionAttributeNames(expressionAttributeNames)
                 .build();
-
         return ddb.query(queryRequest);
     }
 

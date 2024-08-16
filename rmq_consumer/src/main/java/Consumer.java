@@ -76,10 +76,10 @@ public class Consumer {
                                     "seasonID", AttributeValue.builder().n(String.valueOf(event.getSeasonID())).build(),
                                     "dayID", AttributeValue.builder().n(String.valueOf(event.getDayID())).build(),
                                     "time", AttributeValue.builder().n(String.valueOf(event.getLiftRide().getTime())).build(),
-                                    "resort-season-day", AttributeValue.builder().s(String.format("%s-%s-%s",
+                                    "resort-season-day-lift", AttributeValue.builder().s(String.format("%s-%s-%s-%s",
                                             event.getResortID(),
                                             event.getSeasonID(),
-                                            event.getDayID())).build(),
+                                            event.getDayID(),event.getLiftRide().getLiftID())).build(),
                                     "skier-timestamp", AttributeValue.builder().s(String.format("%s-%s",
                                             event.getSkierID(),
                                             event.getTimestamp())).build());
